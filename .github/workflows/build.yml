@@ -41,9 +41,9 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
           TARGET: ${{ matrix.tool }}
-          CFLAGS: ${{ matrix.env.CFLAGS != '' && matrix.env.CFLAGS || null }}
-          LDFLAGS: ${{ matrix.env.LDFLAGS != '' && matrix.env.LDFLAGS || null }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CFLAGS: "-Os -flto=auto -DNDEBUG -static-libgcc -static"
+          LDFLAGS: "-Wl,--strip-all"
         run: |
           DEPS_DIR=$GITHUB_WORKSPACE/deps
           export CC="$TARGET-gcc"
@@ -61,7 +61,7 @@ jobs:
           for i in libmnl libnfnetlink libnetfilter_queue ; do
             (
               cd $i-*
-              CFLAGS="-Os -flto=auto $CFLAGS" \
+              CFLAGS="$CFLAGS -DZAPRET_GH_VER=${{ github.ref_name }} -DZAPRET_GH_HASH=${{ github.sha }} -I$DEPS_DIR/include" \
               ./configure --prefix= --host=$TARGET --enable-static --disable-shared --disable-dependency-tracking
               make install -j$(nproc) DESTDIR=$DEPS_DIR
             )
@@ -72,16 +72,21 @@ jobs:
             xargs -I{} wget -qO- https://github.com/madler/zlib/archive/refs/tags/{}.tar.gz | tar -xz
           (
             cd zlib-*
-            CFLAGS="-Os -flto=auto $CFLAGS" \
-            ./configure --prefix= --static
+            CFLAGS="$CFLAGS" ./configure --prefix= --static
             make install -j$(nproc) DESTDIR=$DEPS_DIR
           )
 
           install -Dm644 -t $DEPS_DIR/include/sys /usr/include/x86_64-linux-gnu/sys/queue.h /usr/include/sys/capability.h
 
-          CFLAGS="-DZAPRET_GH_VER=${{ github.ref_name }} -DZAPRET_GH_HASH=${{ github.sha }} -static-libgcc -static -I$DEPS_DIR/include $CFLAGS" \
-          LDFLAGS="-L$DEPS_DIR/lib $LDFLAGS" \
+          CFLAGS="$CFLAGS -I$DEPS_DIR/include -DZAPRET_GH_VER=${{ github.ref_name }} -DZAPRET_GH_HASH=${{ github.sha }}" \
+          LDFLAGS="$LDFLAGS -L$DEPS_DIR/lib" \
           make -C zapret -j$(nproc)
+
+          # Strip binaries
+          for bin in zapret/binaries/my/* ; do
+            $STRIP $bin || true
+          done
+
           tar -C zapret/binaries/my -cJf zapret-linux-$ARCH.tar.xz .
 
       - name: Upload artifacts
